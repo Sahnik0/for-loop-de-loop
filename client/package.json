@@ -8,7 +8,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@ai-sdk/groq": "latest",
+    "@ai-sdk/groq": "^1.2.9",
+    "@emailjs/browser": "^4.4.1",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
@@ -67,5 +68,10 @@
     "postcss": "^8.5",
     "tailwindcss": "^3.4.17",
     "typescript": "^5"
+  },
+  "overrides": {
+    "react-day-picker": {
+      "date-fns": "$date-fns"
+    }
   }
 }

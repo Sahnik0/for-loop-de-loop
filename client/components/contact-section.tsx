@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Mail, Phone } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import emailjs from '@emailjs/browser'
 
 export default function ContactSection() {
   const [isVisible, setIsVisible] = useState(false)
@@ -19,9 +20,27 @@ export default function ContactSection() {
     message: "",
   })
   const sectionRef = useRef<HTMLElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
   const { toast } = useToast()
 
+  // Get EmailJS configuration from environment variables
+  const EMAILJS_SERVICE_ID = process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID
+  const EMAILJS_TEMPLATE_ID = process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID
+  const EMAILJS_PUBLIC_KEY = process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY
+
   useEffect(() => {
+    // Initialize EmailJS
+    try {
+      if (EMAILJS_PUBLIC_KEY) {
+        emailjs.init(EMAILJS_PUBLIC_KEY)
+        console.log('EmailJS initialized successfully')
+      } else {
+        console.error('EmailJS public key not found in environment variables')
+      }
+    } catch (error) {
+      console.error('EmailJS initialization failed:', error)
+    }
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -36,35 +55,127 @@ export default function ContactSection() {
     }
 
     return () => observer.disconnect()
-  }, [])
+  }, [EMAILJS_PUBLIC_KEY])
+
+  const validateForm = () => {
+    if (!formData.name.trim()) {
+      throw new Error("Please enter your name")
+    }
+    if (!formData.email.trim()) {
+      throw new Error("Please enter your email")
+    }
+    if (!formData.message.trim()) {
+      throw new Error("Please enter your message")
+    }
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(formData.email)) {
+      throw new Error("Please enter a valid email address")
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
 
     try {
-      const response = await fetch("/api/contact", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
+      validateForm()
+
+      // Check if environment variables are configured
+      if (!EMAILJS_SERVICE_ID || !EMAILJS_TEMPLATE_ID || !EMAILJS_PUBLIC_KEY) {
+        throw new Error("EmailJS configuration is missing. Please check your environment variables.")
+      }
+
+      console.log('Sending email with configuration:', {
+        serviceId: EMAILJS_SERVICE_ID,
+        templateId: EMAILJS_TEMPLATE_ID,
+        publicKey: EMAILJS_PUBLIC_KEY.substring(0, 8) + '...' // Hide full key in logs
       })
 
-      if (!response.ok) {
-        throw new Error("Failed to send message")
+      // Enhanced template parameters to show sender info clearly
+      const templateParams = {
+        from_name: formData.name,
+        from_email: formData.email,
+        message: formData.message,
+        to_name: 'For Loop De Loop Team',
+        // Additional parameters to make sender info more visible
+        sender_name: formData.name,
+        sender_email: formData.email,
+        contact_message: formData.message,
+        // Format a complete message with sender info
+        full_message: `
+Name: ${formData.name}
+Email: ${formData.email}
+
+Message:
+${formData.message}
+        `,
+        // Reply-to email for easy response
+        reply_to: formData.email,
+        // Subject line with sender name
+        subject: `New Contact Form Message from ${formData.name}`,
       }
+
+      console.log('Sending with template params:', templateParams)
+
+      const result = await emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        templateParams,
+        EMAILJS_PUBLIC_KEY
+      )
+
+      console.log('Email sent successfully:', result)
 
       toast({
         title: "Message sent!",
         description: "Thank you for your message. We'll get back to you soon.",
       })
 
+      // Reset form
       setFormData({ name: "", email: "", message: "" })
+      
     } catch (error) {
+      console.error('Email sending failed:', error)
+      
+      let errorMessage = "Failed to send message. Please try again."
+      
+      if (error instanceof Error) {
+        errorMessage = error.message
+      } else if (
+        error &&
+        typeof error === 'object' &&
+        'text' in error &&
+        'status' in error &&
+        typeof (error as any).status === 'number'
+      ) {
+        switch ((error as any).status) {
+          case 400:
+            errorMessage = "Invalid request. Please check your form data."
+            break
+          case 401:
+            errorMessage = "Unauthorized. Please check your EmailJS public key."
+            break
+          case 403:
+            errorMessage = "Forbidden. Please check your EmailJS service settings."
+            break
+          case 404:
+            errorMessage = "EmailJS service or template not found. Please check your configuration."
+            break
+          case 422:
+            errorMessage = "Invalid template parameters. Please check your form fields match your EmailJS template."
+            break
+          case 429:
+            errorMessage = "Rate limit exceeded. Please try again later."
+            break
+          default:
+            errorMessage = `EmailJS Error: ${(error as any).text || 'Unknown error'}`
+        }
+      }
+      
       toast({
         title: "Error",
-        description: "Failed to send message. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -73,10 +184,16 @@ export default function ContactSection() {
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setFormData((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }))
+    const { name, value } = e.target
+    
+    // Update form data based on input name
+    if (name === "from_name") {
+      setFormData(prev => ({ ...prev, name: value }))
+    } else if (name === "from_email") {
+      setFormData(prev => ({ ...prev, email: value }))
+    } else if (name === "message") {
+      setFormData(prev => ({ ...prev, message: value }))
+    }
   }
 
   return (
@@ -102,25 +219,27 @@ export default function ContactSection() {
             <Card className="border-0 bg-background/50 backdrop-blur-sm card-glow-primary">
               <CardContent className="p-6 md:p-10">
                 <h3 className="text-xl md:text-2xl font-medium mb-4 md:mb-6">Send us a message</h3>
-                <form onSubmit={handleSubmit} className="space-y-4 md:space-y-6">
+                <form ref={formRef} onSubmit={handleSubmit} className="space-y-4 md:space-y-6">
                   <div>
                     <Input
-                      name="name"
+                      name="from_name"
                       placeholder="Your Name"
                       value={formData.name}
                       onChange={handleChange}
                       required
+                      disabled={isSubmitting}
                       className="border-0 bg-secondary/50 h-10 md:h-12 px-3 md:px-4 text-sm md:text-base"
                     />
                   </div>
                   <div>
                     <Input
-                      name="email"
+                      name="from_email"
                       type="email"
                       placeholder="Your Email"
                       value={formData.email}
                       onChange={handleChange}
                       required
+                      disabled={isSubmitting}
                       className="border-0 bg-secondary/50 h-10 md:h-12 px-3 md:px-4 text-sm md:text-base"
                     />
                   </div>
@@ -132,12 +251,13 @@ export default function ContactSection() {
                       value={formData.message}
                       onChange={handleChange}
                       required
+                      disabled={isSubmitting}
                       className="border-0 bg-secondary/50 px-3 md:px-4 py-2 md:py-3 resize-none text-sm md:text-base"
                     />
                   </div>
                   <Button
                     type="submit"
-                    className="w-full apple-button bg-primary text-primary-foreground hover:opacity-90"
+                    className="w-full apple-button bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
                     disabled={isSubmitting}
                   >
                     {isSubmitting ? "Sending..." : "Send Message"}
